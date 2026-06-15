@@ -126,10 +126,15 @@ export default function Home() {
 
     const { data: urlData } = supabase.storage.from('photos').getPublicUrl(fileName)
 
-    await supabase.from('photos').insert({
-      user_id: session.user.id,
-      image_url: urlData.publicUrl,
-    })
+   const { error: insertError } = await supabase.from('photos').insert({
+  user_id: session.user.id,
+  image_url: urlData.publicUrl,
+})
+
+if (insertError) {
+  alert("Erreur lors de l'enregistrement : " + insertError.message)
+  return
+}
 
     alert('Photo soumise avec succès !')
   }
