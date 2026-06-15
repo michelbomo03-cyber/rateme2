@@ -1,14 +1,27 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 export default function AuthForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [city, setCity] = useState('')
-  const [mode, setMode] = useState('login')
+  const [referralCode, setReferralCode] = useState('')
+  const [mode, setMode] = useState('login') // login | signup
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Pré-remplit le code de parrainage si présent dans l'URL (?ref=CODE)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const ref = params.get('ref')
+      if (ref) {
+        setReferralCode(ref.toUpperCase())
+        setMode('signup')
+      }
+    }
+  }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -18,8 +31,21 @@ export default function AuthForm({ onLogin }) {
     if (mode === 'signup') {
       const { data, error } = await supabase.auth.signUp({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
-      if (data.user && city) {
-        await supabase.from('profiles').update({ city }).eq('id', data.user.id)
+      // met à jour la ville et le parrain du profil (créé automatiquement par trigger)
+      if (data.user) {
+        const updates = {}
+        if (city) updates.city = city
+        if (referralCode) {
+          const { data: referrer } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('referral_code', referralCode.toUpperCase().trim())
+            .single()
+          if (referrer) updates.referred_by = referrer.id
+        }
+        if (Object.keys(updates).length > 0) {
+          await supabase.from('profiles').update(updates).eq('id', data.user.id)
+        }
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -50,6 +76,13 @@ export default function AuthForm({ onLogin }) {
             type="text" placeholder="Votre ville" value={city}
             onChange={e => setCity(e.target.value)}
             style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }}
+          />
+        )}
+        {mode === 'signup' && (
+          <input
+            type="text" placeholder="Code de parrainage (optionnel)" value={referralCode}
+            onChange={e => setReferralCode(e.target.value.toUpperCase())}
+            style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14, textTransform: 'uppercase' }}
           />
         )}
         {error && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
