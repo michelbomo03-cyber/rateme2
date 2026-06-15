@@ -55,6 +55,7 @@ export default function Home() {
   const [leaderboard, setLeaderboard] = useState([])
   const [leaderboardScope, setLeaderboardScope] = useState('global') // global | country | city
   const [leaderboardCategory, setLeaderboardCategory] = useState('beaute')
+  const [referralStats, setReferralStats] = useState(null)
 
   // Vérifie la session au chargement
   useEffect(() => {
@@ -90,6 +91,13 @@ export default function Home() {
       .eq('user_id', session.user.id)
       .single()
     setWallet(balance ? Number(balance.available_balance) : 0)
+
+    const { data: refStats } = await supabase
+      .from('referral_stats')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .single()
+    setReferralStats(refStats || null)
   }
 
   // Charge une photo aléatoire dans la catégorie choisie, que l'utilisateur n'a pas encore notée et qui n'est pas la sienne
@@ -265,14 +273,14 @@ export default function Home() {
 
       {/* Tabs */}
       <div style={{ background: '#fff', display: 'flex', borderBottom: '1px solid #DADDE1' }}>
-        {['vote', 'submit', 'leaderboard', 'results'].map(t => (
+        {['vote', 'submit', 'leaderboard', 'invite', 'results'].map(t => (
           <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyPhotos(); if (t === 'leaderboard') loadLeaderboard() }}
             style={{
-              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 12, fontWeight: 600, cursor: 'pointer',
               color: tab === t ? '#1877F2' : '#65676B',
               borderBottom: tab === t ? '3px solid #1877F2' : '3px solid transparent',
             }}>
-            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : 'Mes photos'}
+            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : t === 'invite' ? 'Inviter' : 'Mes photos'}
           </div>
         ))}
       </div>
@@ -524,6 +532,121 @@ export default function Home() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* TAB INVITE */}
+        {tab === 'invite' && (
+          <div>
+            {(() => {
+              const code = referralStats?.referral_code || '...'
+              const link = `https://rateme2.vercel.app/?ref=${code}`
+              const message = `Salut ! Je teste RateMe, une appli où tu te fais évaluer anonymement par la communauté et où tu gagnes des récompenses. Rejoins-moi avec mon lien : ${link}`
+              const encodedMessage = encodeURIComponent(message)
+              const encodedLink = encodeURIComponent(link)
+
+              const premiumDate = referralStats?.premium_until ? new Date(referralStats.premium_until) : null
+              const premiumActive = premiumDate && premiumDate > new Date()
+
+              return (
+                <>
+                  {/* Carte principale */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8,
+                    padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>
+                      Invitez vos amis, gagnez du Premium
+                    </div>
+                    <div style={{ fontSize: 13, opacity: 0.95, marginBottom: 16 }}>
+                      Pour chaque ami qui effectue 10 évaluations, recevez <strong>1 mois d'abonnement Premium offert</strong>, sans limite.
+                    </div>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '12px 16px',
+                      fontSize: 22, fontWeight: 800, letterSpacing: 4, marginBottom: 8
+                    }}>
+                      {code}
+                    </div>
+                    <div style={{ fontSize: 11, opacity: 0.85 }}>Votre code de parrainage</div>
+                  </div>
+
+                  {/* Boutons de partage */}
+                  <div style={{ background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #DADDE1', marginBottom: 16 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1C1E21', marginBottom: 12 }}>Partager mon lien</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <a href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer"
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          background: '#25D366', color: '#fff', borderRadius: 8, padding: '12px 0',
+                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
+                        }}>
+                        WhatsApp
+                      </a>
+                      <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`} target="_blank" rel="noopener noreferrer"
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          background: '#1877F2', color: '#fff', borderRadius: 8, padding: '12px 0',
+                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
+                        }}>
+                        Facebook
+                      </a>
+                      <a href={`sms:?body=${encodedMessage}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          background: '#34C759', color: '#fff', borderRadius: 8, padding: '12px 0',
+                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
+                        }}>
+                        SMS
+                      </a>
+                      <a href={`mailto:?subject=${encodeURIComponent('Rejoins-moi sur RateMe')}&body=${encodedMessage}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          background: '#65676B', color: '#fff', borderRadius: 8, padding: '12px 0',
+                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
+                        }}>
+                        E-mail
+                      </a>
+                    </div>
+                    <button onClick={() => { navigator.clipboard.writeText(link); alert('Lien copié !') }}
+                      style={{
+                        width: '100%', marginTop: 10, padding: '12px 0', borderRadius: 8,
+                        border: '1px solid #DADDE1', background: '#F0F2F5', color: '#1C1E21',
+                        fontSize: 13, fontWeight: 700, cursor: 'pointer'
+                      }}>
+                      Copier le lien
+                    </button>
+                  </div>
+
+                  {/* Statistiques */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                    <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #DADDE1' }}>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: '#1877F2' }}>{referralStats?.total_referrals || 0}</div>
+                      <div style={{ fontSize: 11, color: '#65676B', marginTop: 4 }}>Amis invités</div>
+                    </div>
+                    <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #DADDE1' }}>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: '#42B72A' }}>{referralStats?.active_referrals || 0}</div>
+                      <div style={{ fontSize: 11, color: '#65676B', marginTop: 4 }}>Mois Premium gagnés</div>
+                    </div>
+                  </div>
+
+                  {/* Statut Premium */}
+                  <div style={{
+                    background: premiumActive ? '#42B72A18' : '#F0F2F5', borderRadius: 8, padding: 14,
+                    textAlign: 'center', border: `1px solid ${premiumActive ? '#42B72A' : '#DADDE1'}`
+                  }}>
+                    {premiumActive ? (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A' }}>
+                        Premium actif jusqu'au {premiumDate.toLocaleDateString('fr-FR')}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, color: '#65676B' }}>
+                        Pas encore de Premium actif. Invitez des amis pour en débloquer !
+                      </div>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
           </div>
         )}
 
