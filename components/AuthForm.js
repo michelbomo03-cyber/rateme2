@@ -10,6 +10,7 @@ export default function AuthForm({ onLogin }) {
   const [mode, setMode] = useState('login') // login | signup
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [confirmationSent, setConfirmationSent] = useState(false)
 
   // Pré-remplit le code de parrainage si présent dans l'URL (?ref=CODE)
   useEffect(() => {
@@ -47,6 +48,9 @@ export default function AuthForm({ onLogin }) {
           await supabase.from('profiles').update(updates).eq('id', data.user.id)
         }
       }
+      setLoading(false)
+      setConfirmationSent(true)
+      return
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
@@ -54,6 +58,38 @@ export default function AuthForm({ onLogin }) {
 
     setLoading(false)
     onLogin()
+  }
+
+  if (confirmationSent) {
+    return (
+      <div style={{ maxWidth: 360, margin: '60px auto', padding: 24, background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', fontFamily: 'Helvetica, Arial, sans-serif', textAlign: 'center' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#1877F2', margin: '0 0 20px', letterSpacing: -0.5 }}>RateMe</h1>
+
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%', background: '#1877F218',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          margin: '0 auto 16px', fontSize: 28, color: '#1877F2', fontWeight: 800
+        }}>
+          ✓
+        </div>
+
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 8 }}>
+          Vérifiez votre boîte mail
+        </div>
+        <div style={{ fontSize: 13, color: '#65676B', lineHeight: 1.6, marginBottom: 20 }}>
+          Un e-mail de confirmation a été envoyé à <strong style={{ color: '#1C1E21' }}>{email}</strong>.
+          Cliquez sur le lien qu'il contient pour valider votre compte et accéder à RateMe.
+        </div>
+        <div style={{ fontSize: 11, color: '#8A8D91', marginBottom: 20 }}>
+          Pensez à vérifier vos courriers indésirables si vous ne le trouvez pas.
+        </div>
+
+        <button onClick={() => { setConfirmationSent(false); setMode('login') }}
+          style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: '#1877F2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>
+          Retour à la connexion
+        </button>
+      </div>
+    )
   }
 
   return (
