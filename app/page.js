@@ -50,6 +50,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false)
   const [voteCategory, setVoteCategory] = useState('beaute')
   const [submitCategory, setSubmitCategory] = useState('beaute')
+  const [wallet, setWallet] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -76,6 +77,13 @@ export default function Home() {
       .eq('id', session.user.id)
       .single()
     setProfile(data)
+
+    const { data: balance } = await supabase
+      .from('wallet_balance')
+      .select('available_balance')
+      .eq('user_id', session.user.id)
+      .single()
+    setWallet(balance ? Number(balance.available_balance) : 0)
   }
 
   async function loadNextPhoto(category) {
@@ -141,12 +149,21 @@ export default function Home() {
       .select('*')
       .in('photo_id', photoIds)
 
+    const { data: rankings } = await supabase
+      .from('photo_rankings')
+      .select('*')
+      .in('photo_id', photoIds)
+
     const scoresMap = {}
     ;(scores || []).forEach(s => { scoresMap[s.photo_id] = s })
+
+    const rankingsMap = {}
+    ;(rankings || []).forEach(r => { rankingsMap[r.photo_id] = r })
 
     const merged = myPhotos.map(p => ({
       ...p,
       score: scoresMap[p.id] || null,
+      ranking: rankingsMap[p.id] || null,
     }))
 
     setMyScore(merged)
@@ -197,8 +214,11 @@ export default function Home() {
   return (
     <div style={{ maxWidth: 390, margin: '0 auto', minHeight: '100vh', background: '#F0F2F5', fontFamily: 'Helvetica, Arial, sans-serif' }}>
 
-      <div style={{ background: '#fff', padding: '14px 20px', borderBottom: '1px solid #DADDE1' }}>
+      <div style={{ background: '#fff', padding: '14px 20px', borderBottom: '1px solid #DADDE1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#1877F2', letterSpacing: -0.5 }}>RateMe</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px' }}>
+          {wallet.toFixed(2)} €
+        </div>
       </div>
 
       <div style={{ background: '#fff', display: 'flex', borderBottom: '1px solid #DADDE1' }}>
@@ -333,6 +353,29 @@ export default function Home() {
                           <span style={{ fontSize: 28, fontWeight: 800, color: '#1C1E21' }}>{p.score.global_score}%</span>
                           <span style={{ fontSize: 12, color: '#65676B' }}>{p.score.total_votes} évaluations</span>
                         </div>
+                        {p.ranking && (
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                            {p.ranking.city && (
+                              <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                                <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.city}</div>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.city_rank}</div>
+                                <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_city}</div>
+                              </div>
+                            )}
+                            {p.ranking.country && (
+                              <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                                <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.country}</div>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.country_rank}</div>
+                                <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_country}</div>
+                              </div>
+                            )}
+                            <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                              <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>Mondial</div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.global_rank}</div>
+                              <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_global}</div>
+                            </div>
+                          </div>
+                        )}
                         {cat.levels.map(l => (
                           <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                             <span style={{ width: 110, fontSize: 12, color: '#1C1E21' }}>{l.label}</span>

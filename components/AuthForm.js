@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 export default function AuthForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [city, setCity] = useState('')
   const [mode, setMode] = useState('login')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -15,8 +16,11 @@ export default function AuthForm({ onLogin }) {
     setLoading(true)
 
     if (mode === 'signup') {
-      const { error } = await supabase.auth.signUp({ email, password })
+      const { data, error } = await supabase.auth.signUp({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
+      if (data.user && city) {
+        await supabase.from('profiles').update({ city }).eq('id', data.user.id)
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
@@ -41,6 +45,13 @@ export default function AuthForm({ onLogin }) {
           onChange={e => setPassword(e.target.value)} required minLength={6}
           style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }}
         />
+        {mode === 'signup' && (
+          <input
+            type="text" placeholder="Votre ville" value={city}
+            onChange={e => setCity(e.target.value)}
+            style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }}
+          />
+        )}
         {error && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
         <button type="submit" disabled={loading}
           style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: '#1877F2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>
