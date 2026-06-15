@@ -81,25 +81,33 @@ export default function Home() {
     }
   }
 
-  async function loadMyScore() {
+  async function loadMyPhotos() {
     const { data: myPhotos } = await supabase
       .from('photos')
-      .select('id')
+      .select('id, image_url, created_at')
       .eq('user_id', session.user.id)
-      .limit(1)
+      .order('created_at', { ascending: false })
 
     if (!myPhotos || myPhotos.length === 0) {
       setMyScore('no_photo')
       return
     }
 
-    const { data: score } = await supabase
+    const photoIds = myPhotos.map(p => p.id)
+    const { data: scores } = await supabase
       .from('photo_scores')
       .select('*')
-      .eq('photo_id', myPhotos[0].id)
-      .single()
+      .in('photo_id', photoIds)
 
-    setMyScore(score || 'no_votes')
+    const scoresMap = {}
+    ;(scores || []).forEach(s => { scoresMap[s.photo_id] = s })
+
+    const merged = myPhotos.map(p => ({
+      ...p,
+      score: scoresMap[p.id] || null,
+    }))
+
+    setMyScore(merged)
   }
 
   async function submitPhoto(e) {
@@ -141,7 +149,7 @@ export default function Home() {
 
       <div style={{ background: '#fff', display: 'flex', borderBottom: '0.5px solid #E5E5EA' }}>
         {['vote', 'submit', 'results'].map(t => (
-          <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyScore() }}
+          <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyPhotos() }}
             style={{
               flex: 1, textAlign: 'center', padding: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer',
               color: tab === t ? '#FF3B5C' : '#8E8E93',
@@ -198,26 +206,43 @@ export default function Home() {
         )}
 
         {tab === 'results' && (
-          <div style={{ background: '#fff', borderRadius: 18, padding: 20, textAlign: 'center' }}>
-            {myScore === 'no_photo' && <div style={{ color: '#8E8E93' }}>Vous n'avez pas encore soumis de photo.</div>}
-            {myScore === 'no_votes' && <div style={{ color: '#8E8E93' }}>Votre photo n'a pas encore reçu de votes.</div>}
-            {myScore && typeof myScore === 'object' && (
-              <>
-                <div style={{ fontSize: 32, fontWeight: 800, color: '#FF3B5C' }}>{myScore.global_score}%</div>
-                <div style={{ fontSize: 12, color: '#8E8E93', marginBottom: 16 }}>{myScore.total_votes} évaluations</div>
-                {LEVELS.map(l => (
-                  <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, textAlign: 'left' }}>
-                    <span style={{ width: 24 }}>{l.emoji}</span>
-                    <div style={{ flex: 1, background: '#F2F2F7', borderRadius: 6, height: 8, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${myScore['pct_' + l.id]}%`, background: l.color, borderRadius: 6 }} />
-                    </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: l.color, minWidth: 36, textAlign: 'right' }}>
-                      {myScore['pct_' + l.id]}%
-                    </span>
-                  </div>
-                ))}
-              </>
+          <div>
+            {myScore === 'no_photo' && (
+              <div style={{ background: '#fff', borderRadius: 18, padding: 20, textAlign: 'center', color: '#8E8E93' }}>
+                Vous n'avez pas encore soumis de photo.
+              </div>
             )}
+            {Array.isArray(myScore) && myScore.map(p => (
+              <div key={p.id} style={{ background: '#fff', borderRadius: 18, overflow: 'hidden', marginBottom: 14 }}>
+                <img src={p.image_url} style={{ width: '100%', height: 260, objectFit: 'cover', display: 'block' }} />
+                <div style={{ padding: 16 }}>
+                  {p.score ? (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <span style={{ fontSize: 28, fontWeight: 800, color: '#FF3B5C' }}>{p.score.global_score}%</span>
+                        <span style={{ fontSize: 12, color: '#8E8E93' }}>{p.score.total_votes} évaluations</span>
+                      </div>
+                      {LEVELS.map(l => (
+                        <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ width: 22 }}>{l.emoji}</span>
+                          <div style={{ flex: 1, background: '#F2F2F7', borderRadius: 6, height: 7, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${p.score['pct_' + l.id]}%`, background: l.color, borderRadius: 6 }} />
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: l.color, minWidth: 32, textAlign: 'right' }}>
+                            {p.score['pct_' + l.id]}%
+                          </span>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ color: '#8E8E93', fontSize: 13, textAlign: 'center' }}>Pas encore de votes</div>
+                  )}
+                  <div style={{ fontSize: 11, color: '#C7C7CC', marginTop: 8 }}>
+                    Soumise le {new Date(p.created_at).toLocaleDateString('fr-FR')}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
