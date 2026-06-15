@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabaseClient'
 export default function AuthForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mode, setMode] = useState('login') // login | signup
+  const [mode, setMode] = useState('login')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -15,12 +15,8 @@ export default function AuthForm({ onLogin }) {
     setLoading(true)
 
     if (mode === 'signup') {
-      const { data, error } = await supabase.auth.signUp({ email, password })
+      const { error } = await supabase.auth.signUp({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
-      // créer le profil associé
-      if (data.user) {
-        await supabase.from('profiles').insert({ id: data.user.id })
-      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) { setError(error.message); setLoading(false); return }
@@ -31,31 +27,30 @@ export default function AuthForm({ onLogin }) {
   }
 
   return (
-    <div style={{ maxWidth: 360, margin: '60px auto', padding: 24, background: '#fff', borderRadius: 20 }}>
-      <div style={{ fontSize: 11, color: '#FF3B5C', letterSpacing: 2, fontWeight: 700 }}>MIROIR NUMERIQUE</div>
-      <h1 style={{ fontSize: 24, margin: '4px 0 20px' }}>RateMe</h1>
+    <div style={{ maxWidth: 360, margin: '60px auto', padding: 24, background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', fontFamily: 'Helvetica, Arial, sans-serif' }}>
+      <h1 style={{ fontSize: 28, fontWeight: 800, color: '#1877F2', margin: '0 0 20px', letterSpacing: -0.5 }}>RateMe</h1>
 
       <form onSubmit={handleSubmit}>
         <input
-          type="email" placeholder="Email" value={email}
+          type="email" placeholder="Adresse e-mail" value={email}
           onChange={e => setEmail(e.target.value)} required
-          style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 12, border: '1px solid #E5E5EA', boxSizing: 'border-box' }}
+          style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }}
         />
         <input
           type="password" placeholder="Mot de passe" value={password}
           onChange={e => setPassword(e.target.value)} required minLength={6}
-          style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 12, border: '1px solid #E5E5EA', boxSizing: 'border-box' }}
+          style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }}
         />
-        {error && <div style={{ color: '#FF3B5C', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+        {error && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
         <button type="submit" disabled={loading}
-          style={{ width: '100%', padding: 13, borderRadius: 14, border: 'none', background: '#FF3B5C', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+          style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: '#1877F2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>
           {loading ? '...' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
         </button>
       </form>
 
-      <div style={{ textAlign: 'center', marginTop: 14, fontSize: 13, color: '#8E8E93', cursor: 'pointer' }}
+      <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#1877F2', fontWeight: 600, cursor: 'pointer' }}
         onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
-        {mode === 'login' ? "Pas de compte ? S'inscrire" : 'Déjà un compte ? Se connecter'}
+        {mode === 'login' ? "Créer un nouveau compte" : 'Vous avez déjà un compte ?'}
       </div>
     </div>
   )
