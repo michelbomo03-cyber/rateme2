@@ -1,4 +1,4 @@
-'use client'
+jsx'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import AuthForm from '../components/AuthForm'
@@ -18,7 +18,6 @@ export default function Home() {
   const [tab, setTab] = useState('vote')
   const [myScore, setMyScore] = useState(null)
 
-  // Vérifie la session au chargement
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -30,7 +29,6 @@ export default function Home() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  // Charge le profil et une photo à voter
   useEffect(() => {
     if (session) {
       loadProfile()
@@ -47,7 +45,6 @@ export default function Home() {
     setProfile(data)
   }
 
-  // Charge une photo aléatoire que l'utilisateur n'a pas encore notée et qui n'est pas la sienne
   async function loadNextPhoto() {
     const { data: votedIds } = await supabase
       .from('votes')
@@ -85,7 +82,6 @@ export default function Home() {
   }
 
   async function loadMyScore() {
-    // récupère ma propre photo
     const { data: myPhotos } = await supabase
       .from('photos')
       .select('id')
@@ -134,18 +130,15 @@ export default function Home() {
   if (!session) return <AuthForm onLogin={() => {}} />
 
   const votesCount = profile?.votes_count || 0
-  const canSubmit = profile?.can_submit || false
 
   return (
     <div style={{ maxWidth: 390, margin: '0 auto', minHeight: '100vh', background: '#F2F2F7' }}>
 
-      {/* Header */}
       <div style={{ background: '#fff', padding: '16px 20px', borderBottom: '0.5px solid #E5E5EA' }}>
         <div style={{ fontSize: 10, color: '#FF3B5C', letterSpacing: 2, fontWeight: 700 }}>MIROIR NUMERIQUE</div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>RateMe</div>
       </div>
 
-      {/* Tabs */}
       <div style={{ background: '#fff', display: 'flex', borderBottom: '0.5px solid #E5E5EA' }}>
         {['vote', 'submit', 'results'].map(t => (
           <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyScore() }}
@@ -161,13 +154,11 @@ export default function Home() {
 
       <div style={{ padding: 16 }}>
 
-        {/* TAB VOTE */}
         {tab === 'vote' && (
           <div>
             <div style={{ background: '#fff', borderRadius: 14, padding: 12, marginBottom: 14, textAlign: 'center' }}>
               <span style={{ fontSize: 13, color: '#8E8E93' }}>Votes effectués : </span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#FF3B5C' }}>{votesCount}/10</span>
-              {canSubmit && <span style={{ fontSize: 12, color: '#34C759', marginLeft: 8 }}>✓ Soumission débloquée</span>}
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#FF3B5C' }}>{votesCount}</span>
             </div>
 
             {photo ? (
@@ -196,28 +187,16 @@ export default function Home() {
           </div>
         )}
 
-        {/* TAB SUBMIT */}
         {tab === 'submit' && (
           <div style={{ background: '#fff', borderRadius: 18, padding: 20, textAlign: 'center' }}>
-            {canSubmit ? (
-              <>
-                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Soumettez votre photo</div>
-                <input type="file" accept="image/*" onChange={submitPhoto} />
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>
-                  Encore {10 - votesCount} votes requis
-                </div>
-                <div style={{ fontSize: 13, color: '#8E8E93' }}>
-                  Votez sur 10 photos minimum pour débloquer la soumission
-                </div>
-              </>
-            )}
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>Soumettez votre photo</div>
+            <div style={{ fontSize: 13, color: '#8E8E93', marginBottom: 14 }}>
+              Une fois soumise, d'autres utilisateurs pourront l'évaluer. Vous pourrez voir vos résultats dans l'onglet "Résultats".
+            </div>
+            <input type="file" accept="image/*" onChange={submitPhoto} />
           </div>
         )}
 
-        {/* TAB RESULTS */}
         {tab === 'results' && (
           <div style={{ background: '#fff', borderRadius: 18, padding: 20, textAlign: 'center' }}>
             {myScore === 'no_photo' && <div style={{ color: '#8E8E93' }}>Vous n'avez pas encore soumis de photo.</div>}
