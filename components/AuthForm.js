@@ -136,7 +136,7 @@ export default function AuthForm({ onLogin }) {
             style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14, textTransform: 'uppercase' }}
           />
         )}
-        {error && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+        {error && typeof error === 'string' && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
         <button type="submit" disabled={loading}
           style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: '#1877F2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>
           {loading ? '...' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
