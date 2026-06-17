@@ -530,7 +530,7 @@ export default function Home() {
                         <img src={entry.image_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
                       <div style={{ flex: 1, fontSize: 13, color: '#1C1E21' }}>
-                        {entry.user_id === session.user.id ? 'Vous' : 'Membre RateMe'}
+                        {entry.user_id === session.user.id ? (profile?.pseudo || 'Vous') : (entry.pseudo || 'Membre RateMe')}
                       </div>
                       <div style={{ fontSize: 14, fontWeight: 800, color: '#1877F2' }}>{entry.avg_score}/10</div>
                     </div>

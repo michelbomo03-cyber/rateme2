@@ -1,11 +1,13 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 export default function AuthForm({ onLogin }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [city, setCity] = useState('')
+  const [pseudo, setPseudo] = useState('')
+  const [pseudoStatus, setPseudoStatus] = useState(null) // null | 'checking' | 'available' | 'taken'
   const [mode, setMode] = useState('login')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -19,9 +21,34 @@ export default function AuthForm({ onLogin }) {
     }
   }, [])
 
+  // Vérification du pseudo avec délai (debounce)
+  useEffect(() => {
+    if (mode !== 'signup' || pseudo.length < 3) {
+      setPseudoStatus(null)
+      return
+    }
+    setPseudoStatus('checking')
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('pseudo', pseudo.trim())
+        .single()
+      setPseudoStatus(data ? 'taken' : 'available')
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [pseudo, mode])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+
+    if (mode === 'signup') {
+      if (pseudo.length < 3) { setError('Le pseudo doit faire au moins 3 caractères.'); return }
+      if (pseudoStatus === 'taken') { setError('Ce pseudo est déjà pris.'); return }
+      if (pseudoStatus === 'checking') { setError('Vérification du pseudo en cours...'); return }
+    }
+
     setLoading(true)
 
     if (mode === 'signup') {
@@ -31,8 +58,10 @@ export default function AuthForm({ onLogin }) {
         setLoading(false)
         return
       }
-      if (data.user && city) {
-        await supabase.from('profiles').update({ city }).eq('id', data.user.id)
+      if (data.user) {
+        const updates = { pseudo: pseudo.trim() }
+        if (city) updates.city = city
+        await supabase.from('profiles').update(updates).eq('id', data.user.id)
       }
       setLoading(false)
       if (data.session) {
@@ -80,22 +109,48 @@ export default function AuthForm({ onLogin }) {
         <input type="email" placeholder="Adresse e-mail" value={email}
           onChange={e => setEmail(e.target.value)} required
           style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
-        <input type="password" placeholder="Mot de passe" value={password}
+        <input type="password" placeholder="Mot de passe (6 caractères min.)" value={password}
           onChange={e => setPassword(e.target.value)} required minLength={6}
           style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
         {mode === 'signup' && (
-          <input type="text" placeholder="Votre ville" value={city}
-            onChange={e => setCity(e.target.value)}
-            style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
+          <>
+            <div style={{ position: 'relative', marginBottom: 4 }}>
+              <input type="text" placeholder="Choisissez un pseudo" value={pseudo}
+                onChange={e => setPseudo(e.target.value)} required
+                style={{
+                  width: '100%', padding: 12, paddingRight: 36, borderRadius: 6, boxSizing: 'border-box', fontSize: 14,
+                  border: `1px solid ${pseudoStatus === 'available' ? '#42B72A' : pseudoStatus === 'taken' ? '#E41E1E' : '#DADDE1'}`
+                }} />
+              {pseudoStatus === 'checking' && (
+                <span style={{ position: 'absolute', right: 12, top: 14, fontSize: 12, color: '#8A8D91' }}>...</span>
+              )}
+              {pseudoStatus === 'available' && (
+                <span style={{ position: 'absolute', right: 12, top: 12, fontSize: 16, color: '#42B72A' }}>✓</span>
+              )}
+              {pseudoStatus === 'taken' && (
+                <span style={{ position: 'absolute', right: 12, top: 12, fontSize: 16, color: '#E41E1E' }}>✗</span>
+              )}
+            </div>
+            {pseudoStatus === 'available' && <div style={{ fontSize: 11, color: '#42B72A', marginBottom: 8 }}>Pseudo disponible !</div>}
+            {pseudoStatus === 'taken' && <div style={{ fontSize: 11, color: '#E41E1E', marginBottom: 8 }}>Ce pseudo est déjà pris.</div>}
+            {!pseudoStatus && pseudo.length > 0 && pseudo.length < 3 && <div style={{ fontSize: 11, color: '#8A8D91', marginBottom: 8 }}>3 caractères minimum.</div>}
+            <input type="text" placeholder="Votre ville" value={city}
+              onChange={e => setCity(e.target.value)}
+              style={{ width: '100%', padding: 12, marginBottom: 10, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
+          </>
         )}
         {error && <div style={{ color: '#E41E1E', fontSize: 13, marginBottom: 10 }}>{error}</div>}
-        <button type="submit" disabled={loading}
-          style={{ width: '100%', padding: 12, borderRadius: 6, border: 'none', background: '#1877F2', color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>
+        <button type="submit" disabled={loading || (mode === 'signup' && pseudoStatus === 'taken')}
+          style={{
+            width: '100%', padding: 12, borderRadius: 6, border: 'none',
+            background: (mode === 'signup' && pseudoStatus === 'taken') ? '#DADDE1' : '#1877F2',
+            color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer'
+          }}>
           {loading ? '...' : mode === 'login' ? 'Se connecter' : "S'inscrire"}
         </button>
       </form>
       <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#1877F2', fontWeight: 600, cursor: 'pointer' }}
-        onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+        onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>
         {mode === 'login' ? "Créer un nouveau compte" : 'Vous avez déjà un compte ?'}
       </div>
     </div>
