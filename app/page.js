@@ -46,7 +46,9 @@ export default function Home() {
   const [tab, setTab] = useState('vote')
   const [myScore, setMyScore] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [avatarUploading, setAvatarUploading] = useState(false)
   const [voteCategory, setVoteCategory] = useState('beaute')
   const [submitCategory, setSubmitCategory] = useState('beaute')
   const [wallet, setWallet] = useState(0)
@@ -61,6 +63,11 @@ export default function Home() {
   const [settingsPseudoStatus, setSettingsPseudoStatus] = useState(null)
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [walletHistory, setWalletHistory] = useState([])
+  const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [reportingPhotoId, setReportingPhotoId] = useState(null)
+  const [reportReason, setReportReason] = useState('')
+  const [reportSent, setReportSent] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -77,6 +84,7 @@ export default function Home() {
     if (session) {
       loadProfile()
       loadNextPhoto()
+      loadNotifications()
     }
   }, [session])
 
@@ -105,7 +113,6 @@ export default function Home() {
       .single()
     setReferralStats(refStats || null)
 
-    // Historique wallet
     const { data: history } = await supabase
       .from('wallet_transactions')
       .select('*')
@@ -113,6 +120,27 @@ export default function Home() {
       .order('created_at', { ascending: false })
       .limit(20)
     setWalletHistory(history || [])
+  }
+
+  async function loadNotifications() {
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(30)
+    setNotifications(data || [])
+    setUnreadCount((data || []).filter(n => !n.read).length)
+  }
+
+  async function markAllRead() {
+    await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('user_id', session.user.id)
+      .eq('read', false)
+    setUnreadCount(0)
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
   async function loadNextPhoto(category) {
@@ -140,6 +168,8 @@ export default function Home() {
     const { data } = await query
     setPhoto(data && data.length > 0 ? data[0] : null)
     setSliderValue(5)
+    setReportingPhotoId(null)
+    setReportSent(false)
   }
 
   async function castVote() {
@@ -154,12 +184,18 @@ export default function Home() {
       category: voteCategory,
     })
     if (!error) {
-      // Créditer 0.005€ par vote dans le wallet
       await supabase.from('wallet_transactions').insert({
         user_id: session.user.id,
         amount: 0.005,
         type: 'vote_reward',
         description: 'Récompense pour évaluation',
+      })
+      // Notifier le propriétaire de la photo
+      await supabase.from('notifications').insert({
+        user_id: photo.user_id,
+        type: 'new_vote',
+        message: `Votre photo a reçu une nouvelle évaluation : ${v.toFixed(1)}/10 en ${CATEGORIES[voteCategory].label}`,
+        read: false,
       })
       await loadProfile()
       await loadNextPhoto()
@@ -169,6 +205,22 @@ export default function Home() {
   function switchVoteCategory(cat) {
     setVoteCategory(cat)
     loadNextPhoto(cat)
+  }
+
+  async function reportPhoto() {
+    if (!reportReason.trim() || !photo) return
+    await supabase.from('reports').insert({
+      photo_id: photo.id,
+      reporter_id: session.user.id,
+      reason: reportReason.trim(),
+    })
+    setReportSent(true)
+    setReportReason('')
+    setTimeout(() => {
+      setReportingPhotoId(null)
+      setReportSent(false)
+      loadNextPhoto()
+    }, 2000)
   }
 
   async function checkSettingsPseudo(value) {
@@ -199,6 +251,24 @@ export default function Home() {
     }
   }
 
+  async function uploadAvatar(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setAvatarPreviewUrl(URL.createObjectURL(file))
+    setAvatarUploading(true)
+    const fileName = `avatar_${session.user.id}_${Date.now()}.${file.name.split('.').pop()}`
+    const { error: uploadError } = await supabase.storage.from('photos').upload(fileName, file)
+    if (uploadError) {
+      alert("Erreur upload avatar : " + uploadError.message)
+      setAvatarUploading(false)
+      return
+    }
+    const { data: urlData } = supabase.storage.from('photos').getPublicUrl(fileName)
+    await supabase.from('profiles').update({ avatar_url: urlData.publicUrl }).eq('id', session.user.id)
+    await loadProfile()
+    setAvatarUploading(false)
+  }
+
   async function deletePhoto(photoId, imageUrl) {
     if (!confirm('Supprimer cette photo définitivement ?')) return
     const fileName = imageUrl.split('/').pop()
@@ -211,12 +281,7 @@ export default function Home() {
   async function loadLeaderboard(category, scope) {
     const cat = category || leaderboardCategory
     const sc = scope || leaderboardScope
-
-    let query = supabase
-      .from('leaderboard')
-      .select('*')
-      .eq('category', cat)
-
+    let query = supabase.from('leaderboard').select('*').eq('category', cat)
     if (sc === 'country' && profile?.country) {
       query = query.eq('country', profile.country).order('country_rank', { ascending: true })
     } else if (sc === 'city' && profile?.city) {
@@ -224,7 +289,6 @@ export default function Home() {
     } else {
       query = query.order('global_rank', { ascending: true })
     }
-
     const { data } = await query.limit(10)
     setLeaderboard(data || [])
   }
@@ -250,72 +314,56 @@ export default function Home() {
     }
 
     const photoIds = myPhotos.map(p => p.id)
-    const { data: scores } = await supabase
-      .from('photo_scores')
-      .select('*')
-      .in('photo_id', photoIds)
-
-    const { data: rankings } = await supabase
-      .from('photo_rankings')
-      .select('*')
-      .in('photo_id', photoIds)
+    const { data: scores } = await supabase.from('photo_scores').select('*').in('photo_id', photoIds)
+    const { data: rankings } = await supabase.from('photo_rankings').select('*').in('photo_id', photoIds)
 
     const scoresMap = {}
     ;(scores || []).forEach(s => { scoresMap[s.photo_id] = s })
-
     const rankingsMap = {}
     ;(rankings || []).forEach(r => { rankingsMap[r.photo_id] = r })
 
-    const merged = myPhotos.map(p => ({
+    setMyScore(myPhotos.map(p => ({
       ...p,
       score: scoresMap[p.id] || null,
       ranking: rankingsMap[p.id] || null,
-    }))
-
-    setMyScore(merged)
+    })))
   }
 
   async function submitPhoto(e) {
     const file = e.target.files[0]
     if (!file) return
-
     setPreviewUrl(URL.createObjectURL(file))
     setUploading(true)
-
     const fileName = `${session.user.id}_${Date.now()}.${file.name.split('.').pop()}`
-    const { error: uploadError } = await supabase.storage
-      .from('photos')
-      .upload(fileName, file)
-
+    const { error: uploadError } = await supabase.storage.from('photos').upload(fileName, file)
     if (uploadError) {
       alert("Erreur lors de l'upload : " + uploadError.message)
       setUploading(false)
       return
     }
-
     const { data: urlData } = supabase.storage.from('photos').getPublicUrl(fileName)
-
     const { error: insertError } = await supabase.from('photos').insert({
       user_id: session.user.id,
       image_url: urlData.publicUrl,
       category: submitCategory,
     })
-
     setUploading(false)
-
     if (insertError) {
       alert("Erreur lors de l'enregistrement : " + insertError.message)
       return
     }
-
     alert('Photo soumise avec succès !')
     setPreviewUrl(null)
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Chargement...</div>
-  if (!session) return <AuthForm onLogin={() => { window.location.reload() }} />
+  if (!session) {
+    const AuthForm = require('../components/AuthForm').default
+    return <AuthForm onLogin={() => { window.location.reload() }} />
+  }
 
   const votesCount = profile?.votes_count || 0
+  const avatarUrl = profile?.avatar_url || null
 
   return (
     <div style={{ maxWidth: 390, margin: '0 auto', minHeight: '100vh', background: '#F0F2F5', fontFamily: 'Helvetica, Arial, sans-serif' }}>
@@ -323,14 +371,34 @@ export default function Home() {
       {/* Header */}
       <div style={{ background: '#fff', padding: '14px 20px', borderBottom: '1px solid #DADDE1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#1877F2', letterSpacing: -0.5 }}>RateMe</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div onClick={() => setTab('wallet')}
             style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
             {wallet.toFixed(3)} €
           </div>
-          <div onClick={() => setTab('settings')}
-            style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', color: tab === 'settings' ? '#1877F2' : '#65676B', padding: '4px 8px', borderRadius: 6, border: '1px solid #DADDE1', background: tab === 'settings' ? '#1877F218' : '#fff' }}>
-            Profil
+          {/* Cloche notifications */}
+          <div onClick={() => { setTab('notifs'); markAllRead() }}
+            style={{ position: 'relative', cursor: 'pointer', padding: '4px 8px', borderRadius: 6, border: '1px solid #DADDE1', background: tab === 'notifs' ? '#1877F218' : '#fff' }}>
+            <span style={{ fontSize: 16 }}>🔔</span>
+            {unreadCount > 0 && (
+              <div style={{
+                position: 'absolute', top: -4, right: -4, background: '#E41E1E',
+                color: '#fff', borderRadius: '50%', width: 18, height: 18,
+                fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </div>
+            )}
+          </div>
+          {/* Avatar */}
+          <div onClick={() => setTab('settings')} style={{ cursor: 'pointer' }}>
+            {avatarUrl ? (
+              <img src={avatarUrl} style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: '2px solid #1877F2' }} />
+            ) : (
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#1877F218', border: '2px solid #1877F2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#1877F2', fontWeight: 800 }}>
+                {(profile?.pseudo || session.user.email || '?')[0].toUpperCase()}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -376,9 +444,53 @@ export default function Home() {
 
             {photo ? (
               <>
-                <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 14, border: '1px solid #DADDE1' }}>
+                <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 14, border: '1px solid #DADDE1', position: 'relative' }}>
                   <img src={photo.image_url} style={{ width: '100%', height: 320, objectFit: 'cover', display: 'block' }} />
+                  {/* Bouton signalement */}
+                  <button onClick={() => setReportingPhotoId(reportingPhotoId === photo.id ? null : photo.id)}
+                    style={{
+                      position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.5)',
+                      border: 'none', borderRadius: 6, color: '#fff', fontSize: 12, fontWeight: 700,
+                      padding: '5px 10px', cursor: 'pointer'
+                    }}>
+                    ⚑ Signaler
+                  </button>
                 </div>
+
+                {/* Formulaire de signalement */}
+                {reportingPhotoId === photo.id && (
+                  <div style={{ background: '#fff', borderRadius: 8, padding: 16, marginBottom: 14, border: '1px solid #E41E1E' }}>
+                    {reportSent ? (
+                      <div style={{ textAlign: 'center', color: '#42B72A', fontWeight: 700 }}>✓ Signalement envoyé. Merci !</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#E41E1E', marginBottom: 10 }}>Signaler cette photo</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                          {['Contenu inapproprié', 'Nudité / contenu explicite', 'Harcèlement', 'Fausse identité', 'Autre'].map(r => (
+                            <div key={r} onClick={() => setReportReason(r)}
+                              style={{
+                                padding: '10px 14px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+                                background: reportReason === r ? '#E41E1E18' : '#F0F2F5',
+                                border: `1px solid ${reportReason === r ? '#E41E1E' : '#DADDE1'}`,
+                                color: reportReason === r ? '#E41E1E' : '#1C1E21',
+                                fontWeight: reportReason === r ? 700 : 400,
+                              }}>
+                              {r}
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={reportPhoto} disabled={!reportReason}
+                          style={{
+                            width: '100%', padding: 10, borderRadius: 6, border: 'none',
+                            background: reportReason ? '#E41E1E' : '#DADDE1',
+                            color: '#fff', fontWeight: 700, fontSize: 14, cursor: reportReason ? 'pointer' : 'default'
+                          }}>
+                          Envoyer le signalement
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {(() => {
                   const levels = CATEGORIES[voteCategory].levels
@@ -393,12 +505,10 @@ export default function Home() {
                       <div style={{ fontSize: 48, fontWeight: 800, color: sliderColor, lineHeight: 1, transition: 'color 0.15s', marginBottom: 4 }}>
                         {sliderValue.toFixed(1)}<span style={{ fontSize: 20, color: '#8A8D91' }}>/10</span>
                       </div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 18, minHeight: 22, transition: 'opacity 0.15s' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 18, minHeight: 22 }}>
                         {zoneLevel.label}
                       </div>
-
-                      <input
-                        type="range" min="0" max="10" step="0.1" value={sliderValue}
+                      <input type="range" min="0" max="10" step="0.1" value={sliderValue}
                         onChange={e => setSliderValue(parseFloat(e.target.value))}
                         style={{
                           width: '100%', height: 10, borderRadius: 6, outline: 'none', cursor: 'pointer',
@@ -407,13 +517,11 @@ export default function Home() {
                           WebkitAppearance: 'none', appearance: 'none',
                         }}
                       />
-
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11, color: '#8A8D91', fontWeight: 600 }}>
                         {levels.slice().reverse().map(l => (
                           <span key={l.id} style={{ flex: 1, textAlign: 'center' }}>{l.label}</span>
                         ))}
                       </div>
-
                       <button onClick={castVote}
                         style={{
                           marginTop: 20, width: '100%', padding: '14px 0', borderRadius: 8, border: 'none',
@@ -437,10 +545,7 @@ export default function Home() {
         {tab === 'submit' && (
           <div style={{ background: '#fff', borderRadius: 8, padding: 20, border: '1px solid #DADDE1' }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, color: '#1C1E21' }}>Publier une photo</div>
-            <div style={{ fontSize: 13, color: '#65676B', marginBottom: 18 }}>
-              Choisissez la catégorie sur laquelle vous souhaitez être évalué(e).
-            </div>
-
+            <div style={{ fontSize: 13, color: '#65676B', marginBottom: 18 }}>Choisissez la catégorie sur laquelle vous souhaitez être évalué(e).</div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
               {CATEGORY_LIST.map(c => (
                 <div key={c.id} onClick={() => setSubmitCategory(c.id)}
@@ -454,22 +559,16 @@ export default function Home() {
                 </div>
               ))}
             </div>
-
             {previewUrl && (
               <div style={{ borderRadius: 8, overflow: 'hidden', marginBottom: 16, position: 'relative', border: '1px solid #DADDE1' }}>
                 <img src={previewUrl} style={{ width: '100%', height: 240, objectFit: 'cover', display: 'block' }} />
                 {uploading && (
-                  <div style={{
-                    position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#fff', fontSize: 14, fontWeight: 600
-                  }}>
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 600 }}>
                     Envoi en cours...
                   </div>
                 )}
               </div>
             )}
-
             <label style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               background: uploading ? '#1877F280' : '#1877F2', color: '#fff',
@@ -498,7 +597,6 @@ export default function Home() {
                 </div>
               ))}
             </div>
-
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               {[
                 { id: 'city', label: profile?.city || 'Ma ville' },
@@ -515,7 +613,6 @@ export default function Home() {
                 </div>
               ))}
             </div>
-
             {leaderboard.length === 0 ? (
               <div style={{ background: '#fff', borderRadius: 8, padding: 30, textAlign: 'center', color: '#65676B', border: '1px solid #DADDE1' }}>
                 Pas encore de classement disponible pour cette sélection.
@@ -531,32 +628,20 @@ export default function Home() {
                     const medalColors = { 1: '#FFD700', 2: '#C0C0C0', 3: '#CD7F32' }
                     return (
                       <div key={entry.photo_id} style={{ flex: 1, textAlign: 'center' }}>
-                        <div style={{
-                          width: rank === 1 ? 64 : 52, height: rank === 1 ? 64 : 52, borderRadius: '50%',
-                          overflow: 'hidden', margin: '0 auto 6px', border: `3px solid ${medalColors[rank]}`,
-                          boxShadow: `0 0 16px ${medalColors[rank]}80`
-                        }}>
+                        <div style={{ width: rank === 1 ? 64 : 52, height: rank === 1 ? 64 : 52, borderRadius: '50%', overflow: 'hidden', margin: '0 auto 6px', border: `3px solid ${medalColors[rank]}`, boxShadow: `0 0 16px ${medalColors[rank]}80` }}>
                           <img src={entry.image_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 800, color: '#1C1E21' }}>{entry.avg_score}/10</div>
-                        <div style={{
-                          background: medalColors[rank], color: '#fff', borderRadius: 6, height: heights[rank],
-                          marginTop: 6, display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-                          paddingTop: 8, fontSize: 20, fontWeight: 800
-                        }}>
+                        <div style={{ background: medalColors[rank], color: '#fff', borderRadius: 6, height: heights[rank], marginTop: 6, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 8, fontSize: 20, fontWeight: 800 }}>
                           {rank}
                         </div>
                       </div>
                     )
                   })}
                 </div>
-
                 <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', overflow: 'hidden' }}>
                   {leaderboard.slice(3).map((entry, i) => (
-                    <div key={entry.photo_id} style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                      borderBottom: i < leaderboard.slice(3).length - 1 ? '1px solid #F0F2F5' : 'none'
-                    }}>
+                    <div key={entry.photo_id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: i < leaderboard.slice(3).length - 1 ? '1px solid #F0F2F5' : 'none' }}>
                       <div style={{ fontSize: 14, fontWeight: 800, color: '#8A8D91', width: 24 }}>{i + 4}</div>
                       <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
                         <img src={entry.image_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -568,17 +653,9 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
-
-                <div style={{
-                  marginTop: 16, background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8,
-                  padding: 16, textAlign: 'center', color: '#fff'
-                }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
-                    Vous avez ce qu'il faut pour atteindre le podium !
-                  </div>
-                  <div style={{ fontSize: 12, opacity: 0.9 }}>
-                    Publiez une nouvelle photo et grimpez dans le classement {CATEGORIES[leaderboardCategory].label.toLowerCase()}.
-                  </div>
+                <div style={{ marginTop: 16, background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8, padding: 16, textAlign: 'center', color: '#fff' }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Vous avez ce qu'il faut pour atteindre le podium !</div>
+                  <div style={{ fontSize: 12, opacity: 0.9 }}>Publiez une nouvelle photo et grimpez dans le classement {CATEGORIES[leaderboardCategory].label.toLowerCase()}.</div>
                 </div>
               </>
             )}
@@ -596,52 +673,27 @@ export default function Home() {
               const encodedLink = encodeURIComponent(link)
               const premiumDate = referralStats?.premium_until ? new Date(referralStats.premium_until) : null
               const premiumActive = premiumDate && premiumDate > new Date()
-
               return (
                 <>
-                  <div style={{
-                    background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8,
-                    padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16
-                  }}>
+                  <div style={{ background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8, padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16 }}>
                     <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Invitez vos amis, gagnez du Premium</div>
-                    <div style={{ fontSize: 13, opacity: 0.95, marginBottom: 16 }}>
-                      Pour chaque ami qui effectue 10 évaluations, recevez <strong>1 mois d'abonnement Premium offert</strong>, sans limite.
-                    </div>
-                    <div style={{
-                      background: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '12px 16px',
-                      fontSize: 22, fontWeight: 800, letterSpacing: 4, marginBottom: 8
-                    }}>
-                      {code}
-                    </div>
+                    <div style={{ fontSize: 13, opacity: 0.95, marginBottom: 16 }}>Pour chaque ami qui effectue 10 évaluations, recevez <strong>1 mois d'abonnement Premium offert</strong>, sans limite.</div>
+                    <div style={{ background: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '12px 16px', fontSize: 22, fontWeight: 800, letterSpacing: 4, marginBottom: 8 }}>{code}</div>
                     <div style={{ fontSize: 11, opacity: 0.85 }}>Votre code de parrainage</div>
                   </div>
-
                   <div style={{ background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #DADDE1', marginBottom: 16 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#1C1E21', marginBottom: 12 }}>Partager mon lien</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <a href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer"
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#25D366', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                        WhatsApp
-                      </a>
-                      <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`} target="_blank" rel="noopener noreferrer"
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#1877F2', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                        Facebook
-                      </a>
-                      <a href={`sms:?body=${encodedMessage}`}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#34C759', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                        SMS
-                      </a>
-                      <a href={`mailto:?subject=${encodeURIComponent('Rejoins-moi sur RateMe')}&body=${encodedMessage}`}
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#65676B', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
-                        E-mail
-                      </a>
+                      <a href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#25D366', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>WhatsApp</a>
+                      <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1877F2', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>Facebook</a>
+                      <a href={`sms:?body=${encodedMessage}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#34C759', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>SMS</a>
+                      <a href={`mailto:?subject=${encodeURIComponent('Rejoins-moi sur RateMe')}&body=${encodedMessage}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#65676B', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>E-mail</a>
                     </div>
                     <button onClick={() => { navigator.clipboard.writeText(link); alert('Lien copié !') }}
                       style={{ width: '100%', marginTop: 10, padding: '12px 0', borderRadius: 8, border: '1px solid #DADDE1', background: '#F0F2F5', color: '#1C1E21', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                       Copier le lien
                     </button>
                   </div>
-
                   <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                     <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #DADDE1' }}>
                       <div style={{ fontSize: 24, fontWeight: 800, color: '#1877F2' }}>{referralStats?.total_referrals || 0}</div>
@@ -652,19 +704,11 @@ export default function Home() {
                       <div style={{ fontSize: 11, color: '#65676B', marginTop: 4 }}>Mois Premium gagnés</div>
                     </div>
                   </div>
-
-                  <div style={{
-                    background: premiumActive ? '#42B72A18' : '#F0F2F5', borderRadius: 8, padding: 14,
-                    textAlign: 'center', border: `1px solid ${premiumActive ? '#42B72A' : '#DADDE1'}`
-                  }}>
+                  <div style={{ background: premiumActive ? '#42B72A18' : '#F0F2F5', borderRadius: 8, padding: 14, textAlign: 'center', border: `1px solid ${premiumActive ? '#42B72A' : '#DADDE1'}` }}>
                     {premiumActive ? (
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A' }}>
-                        Premium actif jusqu'au {premiumDate.toLocaleDateString('fr-FR')}
-                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A' }}>Premium actif jusqu'au {premiumDate.toLocaleDateString('fr-FR')}</div>
                     ) : (
-                      <div style={{ fontSize: 13, color: '#65676B' }}>
-                        Pas encore de Premium actif. Invitez des amis pour en débloquer !
-                      </div>
+                      <div style={{ fontSize: 13, color: '#65676B' }}>Pas encore de Premium actif. Invitez des amis pour en débloquer !</div>
                     )}
                   </div>
                 </>
@@ -687,9 +731,7 @@ export default function Home() {
                 <div key={p.id} style={{ background: '#fff', borderRadius: 8, overflow: 'hidden', marginBottom: 14, border: '1px solid #DADDE1' }}>
                   <img src={p.image_url} style={{ width: '100%', height: 260, objectFit: 'cover', display: 'block' }} />
                   <div style={{ padding: 16 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1877F2', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                      {cat.label}
-                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1877F2', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>{cat.label}</div>
                     {p.score ? (
                       <>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -698,25 +740,9 @@ export default function Home() {
                         </div>
                         {p.ranking && (
                           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                            {p.ranking.city && (
-                              <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                                <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.city}</div>
-                                <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.city_rank}</div>
-                                <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_city}</div>
-                              </div>
-                            )}
-                            {p.ranking.country && (
-                              <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                                <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.country}</div>
-                                <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.country_rank}</div>
-                                <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_country}</div>
-                              </div>
-                            )}
-                            <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                              <div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>Mondial</div>
-                              <div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.global_rank}</div>
-                              <div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_global}</div>
-                            </div>
+                            {p.ranking.city && (<div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}><div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.city}</div><div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.city_rank}</div><div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_city}</div></div>)}
+                            {p.ranking.country && (<div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}><div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>{p.ranking.country}</div><div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.country_rank}</div><div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_country}</div></div>)}
+                            <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}><div style={{ fontSize: 10, color: '#65676B', fontWeight: 700, textTransform: 'uppercase' }}>Mondial</div><div style={{ fontSize: 16, fontWeight: 800, color: '#1877F2' }}>#{p.ranking.global_rank}</div><div style={{ fontSize: 10, color: '#8A8D91' }}>sur {p.ranking.total_global}</div></div>
                           </div>
                         )}
                         {cat.levels.map(l => (
@@ -725,24 +751,16 @@ export default function Home() {
                             <div style={{ flex: 1, background: '#F0F2F5', borderRadius: 4, height: 8, overflow: 'hidden' }}>
                               <div style={{ height: '100%', width: `${p.score['pct_' + l.id]}%`, background: l.color, borderRadius: 4 }} />
                             </div>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: l.color, minWidth: 32, textAlign: 'right' }}>
-                              {p.score['pct_' + l.id]}%
-                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: l.color, minWidth: 32, textAlign: 'right' }}>{p.score['pct_' + l.id]}%</span>
                           </div>
                         ))}
                       </>
                     ) : (
                       <div style={{ color: '#65676B', fontSize: 13, textAlign: 'center' }}>Pas encore d'évaluations</div>
                     )}
-                    <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 8 }}>
-                      Publiée le {new Date(p.created_at).toLocaleDateString('fr-FR')}
-                    </div>
+                    <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 8 }}>Publiée le {new Date(p.created_at).toLocaleDateString('fr-FR')}</div>
                     <button onClick={() => deletePhoto(p.id, p.image_url)}
-                      style={{
-                        marginTop: 12, width: '100%', padding: '10px 0', borderRadius: 6,
-                        border: '1px solid #E41E1E', background: '#fff', color: '#E41E1E',
-                        fontSize: 13, fontWeight: 700, cursor: 'pointer'
-                      }}>
+                      style={{ marginTop: 12, width: '100%', padding: '10px 0', borderRadius: 6, border: '1px solid #E41E1E', background: '#fff', color: '#E41E1E', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                       Supprimer cette photo
                     </button>
                   </div>
@@ -755,42 +773,68 @@ export default function Home() {
         {/* TAB WALLET */}
         {tab === 'wallet' && (
           <div>
-            <div style={{
-              background: 'linear-gradient(135deg, #42B72A, #1877F2)', borderRadius: 8,
-              padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16
-            }}>
+            <div style={{ background: 'linear-gradient(135deg, #42B72A, #1877F2)', borderRadius: 8, padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16 }}>
               <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 6 }}>Solde disponible</div>
               <div style={{ fontSize: 42, fontWeight: 800, letterSpacing: -1 }}>{wallet.toFixed(3)} €</div>
               <div style={{ fontSize: 12, opacity: 0.85, marginTop: 8 }}>+0,005 € par évaluation effectuée</div>
             </div>
-
             <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', overflow: 'hidden' }}>
-              <div style={{ padding: '12px 16px', borderBottom: '1px solid #F0F2F5', fontSize: 13, fontWeight: 700, color: '#1C1E21' }}>
-                Historique des gains
-              </div>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #F0F2F5', fontSize: 13, fontWeight: 700, color: '#1C1E21' }}>Historique des gains</div>
               {walletHistory.length === 0 ? (
-                <div style={{ padding: 20, textAlign: 'center', color: '#65676B', fontSize: 13 }}>
-                  Aucune transaction pour l'instant. Commencez à évaluer !
-                </div>
+                <div style={{ padding: 20, textAlign: 'center', color: '#65676B', fontSize: 13 }}>Aucune transaction pour l'instant. Commencez à évaluer !</div>
               ) : (
                 walletHistory.map((tx, i) => (
-                  <div key={tx.id || i} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '10px 16px', borderBottom: i < walletHistory.length - 1 ? '1px solid #F0F2F5' : 'none'
-                  }}>
+                  <div key={tx.id || i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: i < walletHistory.length - 1 ? '1px solid #F0F2F5' : 'none' }}>
                     <div>
                       <div style={{ fontSize: 13, color: '#1C1E21' }}>{tx.description || 'Transaction'}</div>
-                      <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 2 }}>
-                        {new Date(tx.created_at).toLocaleDateString('fr-FR')}
-                      </div>
+                      <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 2 }}>{new Date(tx.created_at).toLocaleDateString('fr-FR')}</div>
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#42B72A' }}>
-                      +{Number(tx.amount).toFixed(3)} €
-                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#42B72A' }}>+{Number(tx.amount).toFixed(3)} €</div>
                   </div>
                 ))
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB NOTIFICATIONS */}
+        {tab === 'notifs' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21' }}>Notifications</div>
+              {notifications.some(n => !n.read) && (
+                <button onClick={markAllRead}
+                  style={{ fontSize: 12, color: '#1877F2', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>
+                  Tout marquer comme lu
+                </button>
+              )}
+            </div>
+            {notifications.length === 0 ? (
+              <div style={{ background: '#fff', borderRadius: 8, padding: 30, textAlign: 'center', color: '#65676B', border: '1px solid #DADDE1' }}>
+                Aucune notification pour l'instant.
+              </div>
+            ) : (
+              <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', overflow: 'hidden' }}>
+                {notifications.map((n, i) => (
+                  <div key={n.id || i} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px',
+                    borderBottom: i < notifications.length - 1 ? '1px solid #F0F2F5' : 'none',
+                    background: n.read ? '#fff' : '#1877F208',
+                  }}>
+                    <div style={{ fontSize: 20, marginTop: 2 }}>
+                      {n.type === 'new_vote' ? '⭐' : n.type === 'referral' ? '🎁' : '🔔'}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, color: '#1C1E21', fontWeight: n.read ? 400 : 700 }}>{n.message}</div>
+                      <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 4 }}>
+                        {new Date(n.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    {!n.read && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1877F2', marginTop: 6, flexShrink: 0 }} />}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -799,11 +843,32 @@ export default function Home() {
           <div style={{ background: '#fff', borderRadius: 8, padding: 20, border: '1px solid #DADDE1' }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 20 }}>Mon profil</div>
 
+            {/* Avatar */}
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                {(avatarPreviewUrl || avatarUrl) ? (
+                  <img src={avatarPreviewUrl || avatarUrl} style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', border: '3px solid #1877F2' }} />
+                ) : (
+                  <div style={{ width: 80, height: 80, borderRadius: '50%', background: '#1877F218', border: '3px solid #1877F2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: '#1877F2', fontWeight: 800 }}>
+                    {(profile?.pseudo || session.user.email || '?')[0].toUpperCase()}
+                  </div>
+                )}
+                <label style={{
+                  position: 'absolute', bottom: 0, right: 0,
+                  background: '#1877F2', borderRadius: '50%', width: 26, height: 26,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', fontSize: 14, border: '2px solid #fff'
+                }}>
+                  {avatarUploading ? '...' : '✏️'}
+                  <input type="file" accept="image/*" onChange={uploadAvatar} disabled={avatarUploading} style={{ display: 'none' }} />
+                </label>
+              </div>
+              <div style={{ fontSize: 12, color: '#65676B', marginTop: 8 }}>Appuyez sur le crayon pour changer votre photo</div>
+            </div>
+
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Adresse e-mail</div>
-              <div style={{ padding: 12, borderRadius: 6, border: '1px solid #DADDE1', background: '#F0F2F5', fontSize: 14, color: '#8A8D91' }}>
-                {session.user.email}
-              </div>
+              <div style={{ padding: 12, borderRadius: 6, border: '1px solid #DADDE1', background: '#F0F2F5', fontSize: 14, color: '#8A8D91' }}>{session.user.email}</div>
             </div>
 
             <div style={{ marginBottom: 14 }}>
@@ -812,10 +877,7 @@ export default function Home() {
                 <input type="text" value={settingsPseudo}
                   onChange={e => { setSettingsPseudo(e.target.value); checkSettingsPseudo(e.target.value) }}
                   placeholder="Choisissez un pseudo"
-                  style={{
-                    width: '100%', padding: 12, paddingRight: 36, borderRadius: 6, boxSizing: 'border-box', fontSize: 14,
-                    border: `1px solid ${settingsPseudoStatus === 'available' ? '#42B72A' : settingsPseudoStatus === 'taken' ? '#E41E1E' : '#DADDE1'}`
-                  }} />
+                  style={{ width: '100%', padding: 12, paddingRight: 36, borderRadius: 6, boxSizing: 'border-box', fontSize: 14, border: `1px solid ${settingsPseudoStatus === 'available' ? '#42B72A' : settingsPseudoStatus === 'taken' ? '#E41E1E' : '#DADDE1'}` }} />
                 {settingsPseudoStatus === 'available' && <span style={{ position: 'absolute', right: 12, top: 12, color: '#42B72A', fontSize: 16 }}>✓</span>}
                 {settingsPseudoStatus === 'taken' && <span style={{ position: 'absolute', right: 12, top: 12, color: '#E41E1E', fontSize: 16 }}>✗</span>}
                 {settingsPseudoStatus === 'checking' && <span style={{ position: 'absolute', right: 12, top: 14, color: '#8A8D91', fontSize: 12 }}>...</span>}
@@ -826,17 +888,13 @@ export default function Home() {
 
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Ville</div>
-              <input type="text" value={settingsCity}
-                onChange={e => setSettingsCity(e.target.value)}
-                placeholder="Votre ville"
+              <input type="text" value={settingsCity} onChange={e => setSettingsCity(e.target.value)} placeholder="Votre ville"
                 style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
             </div>
 
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Pays</div>
-              <input type="text" value={settingsCountry}
-                onChange={e => setSettingsCountry(e.target.value)}
-                placeholder="Votre pays (ex: France)"
+              <input type="text" value={settingsCountry} onChange={e => setSettingsCountry(e.target.value)} placeholder="Votre pays (ex: France)"
                 style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
             </div>
 
