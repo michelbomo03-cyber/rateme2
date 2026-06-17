@@ -56,6 +56,10 @@ export default function Home() {
   const [leaderboardScope, setLeaderboardScope] = useState('global') // global | country | city
   const [leaderboardCategory, setLeaderboardCategory] = useState('beaute')
   const [referralStats, setReferralStats] = useState(null)
+  const [settingsPseudo, setSettingsPseudo] = useState('')
+  const [settingsCity, setSettingsCity] = useState('')
+  const [settingsPseudoStatus, setSettingsPseudoStatus] = useState(null)
+  const [settingsSaved, setSettingsSaved] = useState(false)
 
   // Vérifie la session au chargement
   useEffect(() => {
@@ -84,6 +88,8 @@ export default function Home() {
       .eq('id', session.user.id)
       .single()
     setProfile(data)
+    setSettingsPseudo(data?.pseudo || '')
+    setSettingsCity(data?.city || '')
 
     const { data: balance } = await supabase
       .from('wallet_balance')
@@ -150,7 +156,29 @@ export default function Home() {
     loadNextPhoto(cat)
   }
 
-  async function deletePhoto(photoId, imageUrl) {
+  async function checkSettingsPseudo(value) {
+    if (value.length < 3) { setSettingsPseudoStatus(null); return }
+    if (value === profile?.pseudo) { setSettingsPseudoStatus('available'); return }
+    setSettingsPseudoStatus('checking')
+    const { data } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('pseudo', value.trim())
+      .single()
+    setSettingsPseudoStatus(data ? 'taken' : 'available')
+  }
+
+  async function saveSettings() {
+    if (settingsPseudoStatus === 'taken') return
+    if (settingsPseudo.length < 3) return
+    const updates = { pseudo: settingsPseudo.trim(), city: settingsCity.trim() }
+    const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id)
+    if (!error) {
+      await loadProfile()
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2000)
+    }
+  }
     if (!confirm('Supprimer cette photo définitivement ?')) return
 
     // Extraire le nom du fichier depuis l'URL
@@ -292,14 +320,14 @@ export default function Home() {
 
       {/* Tabs */}
       <div style={{ background: '#fff', display: 'flex', borderBottom: '1px solid #DADDE1' }}>
-        {['vote', 'submit', 'leaderboard', 'invite', 'results'].map(t => (
+        {['vote', 'submit', 'leaderboard', 'invite', 'results', 'settings'].map(t => (
           <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyPhotos(); if (t === 'leaderboard') loadLeaderboard() }}
             style={{
-              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 600, cursor: 'pointer',
               color: tab === t ? '#1877F2' : '#65676B',
               borderBottom: tab === t ? '3px solid #1877F2' : '3px solid transparent',
             }}>
-            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : t === 'invite' ? 'Inviter' : 'Mes photos'}
+            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : t === 'invite' ? 'Inviter' : t === 'results' ? 'Mes photos' : '⚙'}
           </div>
         ))}
       </div>
@@ -749,7 +777,59 @@ export default function Home() {
         )}
       </div>
 
-      <div style={{ textAlign: 'center', padding: 16 }}>
+        {/* TAB SETTINGS */}
+        {tab === 'settings' && (
+          <div style={{ background: '#fff', borderRadius: 8, padding: 20, border: '1px solid #DADDE1' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 20 }}>Mon profil</div>
+
+            {/* Email (non modifiable) */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Adresse e-mail</div>
+              <div style={{ padding: 12, borderRadius: 6, border: '1px solid #DADDE1', background: '#F0F2F5', fontSize: 14, color: '#8A8D91' }}>
+                {session.user.email}
+              </div>
+            </div>
+
+            {/* Pseudo */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Pseudo</div>
+              <div style={{ position: 'relative' }}>
+                <input type="text" value={settingsPseudo}
+                  onChange={e => { setSettingsPseudo(e.target.value); checkSettingsPseudo(e.target.value) }}
+                  placeholder="Choisissez un pseudo"
+                  style={{
+                    width: '100%', padding: 12, paddingRight: 36, borderRadius: 6, boxSizing: 'border-box', fontSize: 14,
+                    border: `1px solid ${settingsPseudoStatus === 'available' ? '#42B72A' : settingsPseudoStatus === 'taken' ? '#E41E1E' : '#DADDE1'}`
+                  }} />
+                {settingsPseudoStatus === 'available' && <span style={{ position: 'absolute', right: 12, top: 12, color: '#42B72A', fontSize: 16 }}>✓</span>}
+                {settingsPseudoStatus === 'taken' && <span style={{ position: 'absolute', right: 12, top: 12, color: '#E41E1E', fontSize: 16 }}>✗</span>}
+                {settingsPseudoStatus === 'checking' && <span style={{ position: 'absolute', right: 12, top: 14, color: '#8A8D91', fontSize: 12 }}>...</span>}
+              </div>
+              {settingsPseudoStatus === 'taken' && <div style={{ fontSize: 11, color: '#E41E1E', marginTop: 4 }}>Ce pseudo est déjà pris.</div>}
+              {settingsPseudoStatus === 'available' && <div style={{ fontSize: 11, color: '#42B72A', marginTop: 4 }}>Pseudo disponible !</div>}
+            </div>
+
+            {/* Ville */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Ville</div>
+              <input type="text" value={settingsCity}
+                onChange={e => setSettingsCity(e.target.value)}
+                placeholder="Votre ville"
+                style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
+            </div>
+
+            <button onClick={saveSettings}
+              disabled={settingsPseudoStatus === 'taken' || settingsPseudo.length < 3}
+              style={{
+                width: '100%', padding: 12, borderRadius: 6, border: 'none',
+                background: settingsPseudoStatus === 'taken' || settingsPseudo.length < 3 ? '#DADDE1' : '#1877F2',
+                color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer'
+              }}>
+              {settingsSaved ? 'Enregistré !' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
+
         <button onClick={() => supabase.auth.signOut()}
           style={{ background: 'none', border: 'none', color: '#1877F2', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           Se déconnecter
