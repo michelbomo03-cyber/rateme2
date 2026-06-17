@@ -303,7 +303,7 @@ export default function Home() {
   }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>Chargement...</div>
-  if (!session) return <AuthForm onLogin={() => {}} />
+  if (!session) return <AuthForm onLogin={() => { window.location.reload() }} />
 
   const votesCount = profile?.votes_count || 0
 
@@ -318,8 +318,8 @@ export default function Home() {
             {wallet.toFixed(2)} €
           </div>
           <div onClick={() => setTab('settings')}
-            style={{ fontSize: 20, cursor: 'pointer', color: tab === 'settings' ? '#1877F2' : '#65676B' }}>
-            ⚙
+            style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', color: tab === 'settings' ? '#1877F2' : '#65676B', padding: '4px 8px', borderRadius: 6, border: '1px solid #DADDE1', background: tab === 'settings' ? '#1877F218' : '#fff' }}>
+            Profil
           </div>
         </div>
       </div>
