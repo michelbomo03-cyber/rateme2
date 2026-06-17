@@ -150,6 +150,25 @@ export default function Home() {
     loadNextPhoto(cat)
   }
 
+  async function deletePhoto(photoId, imageUrl) {
+    if (!confirm('Supprimer cette photo définitivement ?')) return
+
+    // Extraire le nom du fichier depuis l'URL
+    const fileName = imageUrl.split('/').pop()
+
+    // Supprimer du storage
+    await supabase.storage.from('photos').remove([fileName])
+
+    // Supprimer les votes associés
+    await supabase.from('votes').delete().eq('photo_id', photoId)
+
+    // Supprimer la photo
+    await supabase.from('photos').delete().eq('id', photoId)
+
+    // Recharger mes photos
+    await loadMyPhotos()
+  }
+
   async function loadLeaderboard(category, scope) {
     const cat = category || leaderboardCategory
     const sc = scope || leaderboardScope
@@ -714,6 +733,14 @@ export default function Home() {
                     <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 8 }}>
                       Publiée le {new Date(p.created_at).toLocaleDateString('fr-FR')}
                     </div>
+                    <button onClick={() => deletePhoto(p.id, p.image_url)}
+                      style={{
+                        marginTop: 12, width: '100%', padding: '10px 0', borderRadius: 6,
+                        border: '1px solid #E41E1E', background: '#fff', color: '#E41E1E',
+                        fontSize: 13, fontWeight: 700, cursor: 'pointer'
+                      }}>
+                      Supprimer cette photo
+                    </button>
                   </div>
                 </div>
               )
