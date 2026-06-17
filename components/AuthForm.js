@@ -46,8 +46,7 @@ export default function AuthForm({ onLogin }) {
 
     if (mode === 'signup') {
       const { data, error } = await supabase.auth.signUp({ email, password })
-      if (error) { setError(error.message); setLoading(false); return }
-      // met à jour la ville et le parrain du profil (créé automatiquement par trigger)
+      if (error) { setError(error.message || 'Erreur lors de l\'inscription'); setLoading(false); return }
       if (data.user) {
         const updates = {}
         if (city) updates.city = city
@@ -64,11 +63,17 @@ export default function AuthForm({ onLogin }) {
         }
       }
       setLoading(false)
-      setConfirmationSent(true)
+      // Si session active = confirmation désactivée, on connecte directement
+      // Sinon on affiche l'écran "vérifiez votre email"
+      if (data.session) {
+        onLogin()
+      } else {
+        setConfirmationSent(true)
+      }
       return
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) { setError(error.message); setLoading(false); return }
+      if (error) { setError(error.message || 'Erreur lors de la connexion'); setLoading(false); return }
     }
 
     setLoading(false)
