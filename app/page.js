@@ -313,21 +313,27 @@ export default function Home() {
       {/* Header */}
       <div style={{ background: '#fff', padding: '14px 20px', borderBottom: '1px solid #DADDE1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#1877F2', letterSpacing: -0.5 }}>RateMe</div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px' }}>
-          {wallet.toFixed(2)} €
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px' }}>
+            {wallet.toFixed(2)} €
+          </div>
+          <div onClick={() => setTab('settings')}
+            style={{ fontSize: 20, cursor: 'pointer', color: tab === 'settings' ? '#1877F2' : '#65676B' }}>
+            ⚙
+          </div>
         </div>
       </div>
 
       {/* Tabs */}
       <div style={{ background: '#fff', display: 'flex', borderBottom: '1px solid #DADDE1' }}>
-        {['vote', 'submit', 'leaderboard', 'invite', 'results', 'settings'].map(t => (
+        {['vote', 'submit', 'leaderboard', 'invite', 'results'].map(t => (
           <div key={t} onClick={() => { setTab(t); if (t === 'results') loadMyPhotos(); if (t === 'leaderboard') loadLeaderboard() }}
             style={{
-              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              flex: 1, textAlign: 'center', padding: '12px 0', fontSize: 12, fontWeight: 600, cursor: 'pointer',
               color: tab === t ? '#1877F2' : '#65676B',
               borderBottom: tab === t ? '3px solid #1877F2' : '3px solid transparent',
             }}>
-            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : t === 'invite' ? 'Inviter' : t === 'results' ? 'Mes photos' : '⚙'}
+            {t === 'vote' ? 'Évaluer' : t === 'submit' ? 'Publier' : t === 'leaderboard' ? 'Classement' : t === 'invite' ? 'Inviter' : 'Mes photos'}
           </div>
         ))}
       </div>
