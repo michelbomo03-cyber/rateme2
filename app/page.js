@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import AuthForm from '../components/AuthForm'
 
 const CATEGORIES = {
   beaute: {
@@ -53,15 +52,16 @@ export default function Home() {
   const [wallet, setWallet] = useState(0)
   const [sliderValue, setSliderValue] = useState(5)
   const [leaderboard, setLeaderboard] = useState([])
-  const [leaderboardScope, setLeaderboardScope] = useState('global') // global | country | city
+  const [leaderboardScope, setLeaderboardScope] = useState('global')
   const [leaderboardCategory, setLeaderboardCategory] = useState('beaute')
   const [referralStats, setReferralStats] = useState(null)
   const [settingsPseudo, setSettingsPseudo] = useState('')
   const [settingsCity, setSettingsCity] = useState('')
+  const [settingsCountry, setSettingsCountry] = useState('')
   const [settingsPseudoStatus, setSettingsPseudoStatus] = useState(null)
   const [settingsSaved, setSettingsSaved] = useState(false)
+  const [walletHistory, setWalletHistory] = useState([])
 
-  // Vérifie la session au chargement
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -73,7 +73,6 @@ export default function Home() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  // Charge le profil et une photo à voter
   useEffect(() => {
     if (session) {
       loadProfile()
@@ -90,6 +89,7 @@ export default function Home() {
     setProfile(data)
     setSettingsPseudo(data?.pseudo || '')
     setSettingsCity(data?.city || '')
+    setSettingsCountry(data?.country || '')
 
     const { data: balance } = await supabase
       .from('wallet_balance')
@@ -104,9 +104,17 @@ export default function Home() {
       .eq('user_id', session.user.id)
       .single()
     setReferralStats(refStats || null)
+
+    // Historique wallet
+    const { data: history } = await supabase
+      .from('wallet_transactions')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    setWalletHistory(history || [])
   }
 
-  // Charge une photo aléatoire dans la catégorie choisie, que l'utilisateur n'a pas encore notée et qui n'est pas la sienne
   async function loadNextPhoto(category) {
     const cat = category || voteCategory
     const { data: votedIds } = await supabase
@@ -146,6 +154,13 @@ export default function Home() {
       category: voteCategory,
     })
     if (!error) {
+      // Créditer 0.005€ par vote dans le wallet
+      await supabase.from('wallet_transactions').insert({
+        user_id: session.user.id,
+        amount: 0.005,
+        type: 'vote_reward',
+        description: 'Récompense pour évaluation',
+      })
       await loadProfile()
       await loadNextPhoto()
     }
@@ -171,7 +186,11 @@ export default function Home() {
   async function saveSettings() {
     if (settingsPseudoStatus === 'taken') return
     if (settingsPseudo.length < 3) return
-    const updates = { pseudo: settingsPseudo.trim(), city: settingsCity.trim() }
+    const updates = {
+      pseudo: settingsPseudo.trim(),
+      city: settingsCity.trim(),
+      country: settingsCountry.trim(),
+    }
     const { error } = await supabase.from('profiles').update(updates).eq('id', session.user.id)
     if (!error) {
       await loadProfile()
@@ -179,21 +198,13 @@ export default function Home() {
       setTimeout(() => setSettingsSaved(false), 2000)
     }
   }
+
+  async function deletePhoto(photoId, imageUrl) {
     if (!confirm('Supprimer cette photo définitivement ?')) return
-
-    // Extraire le nom du fichier depuis l'URL
     const fileName = imageUrl.split('/').pop()
-
-    // Supprimer du storage
     await supabase.storage.from('photos').remove([fileName])
-
-    // Supprimer les votes associés
     await supabase.from('votes').delete().eq('photo_id', photoId)
-
-    // Supprimer la photo
     await supabase.from('photos').delete().eq('id', photoId)
-
-    // Recharger mes photos
     await loadMyPhotos()
   }
 
@@ -238,7 +249,6 @@ export default function Home() {
       return
     }
 
-    // récupère les scores pour chaque photo
     const photoIds = myPhotos.map(p => p.id)
     const { data: scores } = await supabase
       .from('photo_scores')
@@ -314,8 +324,9 @@ export default function Home() {
       <div style={{ background: '#fff', padding: '14px 20px', borderBottom: '1px solid #DADDE1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#1877F2', letterSpacing: -0.5 }}>RateMe</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px' }}>
-            {wallet.toFixed(2)} €
+          <div onClick={() => setTab('wallet')}
+            style={{ fontSize: 13, fontWeight: 700, color: '#42B72A', background: '#42B72A18', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
+            {wallet.toFixed(3)} €
           </div>
           <div onClick={() => setTab('settings')}
             style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', color: tab === 'settings' ? '#1877F2' : '#65676B', padding: '4px 8px', borderRadius: 6, border: '1px solid #DADDE1', background: tab === 'settings' ? '#1877F218' : '#fff' }}>
@@ -343,7 +354,6 @@ export default function Home() {
         {/* TAB VOTE */}
         {tab === 'vote' && (
           <div>
-            {/* Sélecteur de catégorie */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
               {CATEGORY_LIST.map(c => (
                 <div key={c.id} onClick={() => switchVoteCategory(c.id)}
@@ -361,6 +371,7 @@ export default function Home() {
             <div style={{ background: '#fff', borderRadius: 8, padding: 12, marginBottom: 14, textAlign: 'center', border: '1px solid #DADDE1' }}>
               <span style={{ fontSize: 13, color: '#65676B' }}>Évaluations effectuées : </span>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#1877F2' }}>{votesCount}</span>
+              <span style={{ fontSize: 12, color: '#42B72A', marginLeft: 10 }}>+0,005 € par vote</span>
             </div>
 
             {photo ? (
@@ -370,27 +381,19 @@ export default function Home() {
                 </div>
 
                 {(() => {
-                  const levels = CATEGORIES[voteCategory].levels // [nope, ordinary, charm, hot] order in array is hot,charm,ordinary,nope
-                  // levels array order: hot, charm, ordinary, nope -> reorder for zones low->high
+                  const levels = CATEGORIES[voteCategory].levels
                   const zoneLevel = sliderValue < 2.5 ? levels[3] : sliderValue < 5 ? levels[2] : sliderValue < 7.5 ? levels[1] : levels[0]
                   const pct = sliderValue / 10
-                  // dégradé rouge -> orange -> vert -> bleu selon score
-                  const hue = Math.round(pct * 130) // 0=rouge, 130=vert/bleu
+                  const hue = Math.round(pct * 130)
                   const sliderColor = `hsl(${hue}, 80%, 45%)`
                   const glow = `0 0 ${10 + pct * 30}px ${sliderColor}80`
 
                   return (
                     <div style={{ background: '#fff', borderRadius: 8, padding: 20, marginBottom: 14, border: '1px solid #DADDE1', textAlign: 'center' }}>
-                      <div style={{
-                        fontSize: 48, fontWeight: 800, color: sliderColor, lineHeight: 1,
-                        transition: 'color 0.15s', marginBottom: 4
-                      }}>
+                      <div style={{ fontSize: 48, fontWeight: 800, color: sliderColor, lineHeight: 1, transition: 'color 0.15s', marginBottom: 4 }}>
                         {sliderValue.toFixed(1)}<span style={{ fontSize: 20, color: '#8A8D91' }}>/10</span>
                       </div>
-                      <div style={{
-                        fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 18,
-                        minHeight: 22, transition: 'opacity 0.15s'
-                      }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 18, minHeight: 22, transition: 'opacity 0.15s' }}>
                         {zoneLevel.label}
                       </div>
 
@@ -474,8 +477,7 @@ export default function Home() {
               cursor: uploading ? 'default' : 'pointer', textAlign: 'center'
             }}>
               {uploading ? 'Envoi en cours...' : (previewUrl ? 'Changer de photo' : 'Choisir une photo')}
-              <input type="file" accept="image/*" onChange={submitPhoto} disabled={uploading}
-                style={{ display: 'none' }} />
+              <input type="file" accept="image/*" onChange={submitPhoto} disabled={uploading} style={{ display: 'none' }} />
             </label>
           </div>
         )}
@@ -483,7 +485,6 @@ export default function Home() {
         {/* TAB LEADERBOARD */}
         {tab === 'leaderboard' && (
           <div>
-            {/* Sélecteur de catégorie */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
               {CATEGORY_LIST.map(c => (
                 <div key={c.id} onClick={() => switchLeaderboard(c.id, undefined)}
@@ -498,7 +499,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Sélecteur de portée */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               {[
                 { id: 'city', label: profile?.city || 'Ma ville' },
@@ -522,7 +522,6 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* PODIUM top 3 */}
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 16 }}>
                   {[1, 0, 2].map(idx => {
                     const entry = leaderboard[idx]
@@ -552,7 +551,6 @@ export default function Home() {
                   })}
                 </div>
 
-                {/* Liste 4-10 */}
                 <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', overflow: 'hidden' }}>
                   {leaderboard.slice(3).map((entry, i) => (
                     <div key={entry.photo_id} style={{
@@ -571,7 +569,6 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* Message d'encouragement */}
                 <div style={{
                   marginTop: 16, background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8,
                   padding: 16, textAlign: 'center', color: '#fff'
@@ -597,20 +594,16 @@ export default function Home() {
               const message = `Salut ! Je teste RateMe, une appli où tu te fais évaluer anonymement par la communauté et où tu gagnes des récompenses. Rejoins-moi avec mon lien : ${link}`
               const encodedMessage = encodeURIComponent(message)
               const encodedLink = encodeURIComponent(link)
-
               const premiumDate = referralStats?.premium_until ? new Date(referralStats.premium_until) : null
               const premiumActive = premiumDate && premiumDate > new Date()
 
               return (
                 <>
-                  {/* Carte principale */}
                   <div style={{
                     background: 'linear-gradient(135deg, #1877F2, #42B72A)', borderRadius: 8,
                     padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16
                   }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>
-                      Invitez vos amis, gagnez du Premium
-                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Invitez vos amis, gagnez du Premium</div>
                     <div style={{ fontSize: 13, opacity: 0.95, marginBottom: 16 }}>
                       Pour chaque ami qui effectue 10 évaluations, recevez <strong>1 mois d'abonnement Premium offert</strong>, sans limite.
                     </div>
@@ -623,54 +616,32 @@ export default function Home() {
                     <div style={{ fontSize: 11, opacity: 0.85 }}>Votre code de parrainage</div>
                   </div>
 
-                  {/* Boutons de partage */}
                   <div style={{ background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #DADDE1', marginBottom: 16 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#1C1E21', marginBottom: 12 }}>Partager mon lien</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <a href={`https://wa.me/?text=${encodedMessage}`} target="_blank" rel="noopener noreferrer"
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                          background: '#25D366', color: '#fff', borderRadius: 8, padding: '12px 0',
-                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
-                        }}>
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#25D366', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
                         WhatsApp
                       </a>
                       <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodedLink}`} target="_blank" rel="noopener noreferrer"
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                          background: '#1877F2', color: '#fff', borderRadius: 8, padding: '12px 0',
-                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
-                        }}>
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#1877F2', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
                         Facebook
                       </a>
                       <a href={`sms:?body=${encodedMessage}`}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                          background: '#34C759', color: '#fff', borderRadius: 8, padding: '12px 0',
-                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
-                        }}>
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#34C759', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
                         SMS
                       </a>
                       <a href={`mailto:?subject=${encodeURIComponent('Rejoins-moi sur RateMe')}&body=${encodedMessage}`}
-                        style={{
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                          background: '#65676B', color: '#fff', borderRadius: 8, padding: '12px 0',
-                          fontSize: 13, fontWeight: 700, textDecoration: 'none'
-                        }}>
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#65676B', color: '#fff', borderRadius: 8, padding: '12px 0', fontSize: 13, fontWeight: 700, textDecoration: 'none' }}>
                         E-mail
                       </a>
                     </div>
                     <button onClick={() => { navigator.clipboard.writeText(link); alert('Lien copié !') }}
-                      style={{
-                        width: '100%', marginTop: 10, padding: '12px 0', borderRadius: 8,
-                        border: '1px solid #DADDE1', background: '#F0F2F5', color: '#1C1E21',
-                        fontSize: 13, fontWeight: 700, cursor: 'pointer'
-                      }}>
+                      style={{ width: '100%', marginTop: 10, padding: '12px 0', borderRadius: 8, border: '1px solid #DADDE1', background: '#F0F2F5', color: '#1C1E21', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                       Copier le lien
                     </button>
                   </div>
 
-                  {/* Statistiques */}
                   <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                     <div style={{ flex: 1, background: '#fff', borderRadius: 8, padding: 16, textAlign: 'center', border: '1px solid #DADDE1' }}>
                       <div style={{ fontSize: 24, fontWeight: 800, color: '#1877F2' }}>{referralStats?.total_referrals || 0}</div>
@@ -682,7 +653,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Statut Premium */}
                   <div style={{
                     background: premiumActive ? '#42B72A18' : '#F0F2F5', borderRadius: 8, padding: 14,
                     textAlign: 'center', border: `1px solid ${premiumActive ? '#42B72A' : '#DADDE1'}`
@@ -781,14 +751,54 @@ export default function Home() {
             })}
           </div>
         )}
-      </div>
+
+        {/* TAB WALLET */}
+        {tab === 'wallet' && (
+          <div>
+            <div style={{
+              background: 'linear-gradient(135deg, #42B72A, #1877F2)', borderRadius: 8,
+              padding: 24, textAlign: 'center', color: '#fff', marginBottom: 16
+            }}>
+              <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 6 }}>Solde disponible</div>
+              <div style={{ fontSize: 42, fontWeight: 800, letterSpacing: -1 }}>{wallet.toFixed(3)} €</div>
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 8 }}>+0,005 € par évaluation effectuée</div>
+            </div>
+
+            <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #DADDE1', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #F0F2F5', fontSize: 13, fontWeight: 700, color: '#1C1E21' }}>
+                Historique des gains
+              </div>
+              {walletHistory.length === 0 ? (
+                <div style={{ padding: 20, textAlign: 'center', color: '#65676B', fontSize: 13 }}>
+                  Aucune transaction pour l'instant. Commencez à évaluer !
+                </div>
+              ) : (
+                walletHistory.map((tx, i) => (
+                  <div key={tx.id || i} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 16px', borderBottom: i < walletHistory.length - 1 ? '1px solid #F0F2F5' : 'none'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, color: '#1C1E21' }}>{tx.description || 'Transaction'}</div>
+                      <div style={{ fontSize: 11, color: '#8A8D91', marginTop: 2 }}>
+                        {new Date(tx.created_at).toLocaleDateString('fr-FR')}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#42B72A' }}>
+                      +{Number(tx.amount).toFixed(3)} €
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         {/* TAB SETTINGS */}
         {tab === 'settings' && (
           <div style={{ background: '#fff', borderRadius: 8, padding: 20, border: '1px solid #DADDE1' }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: '#1C1E21', marginBottom: 20 }}>Mon profil</div>
 
-            {/* Email (non modifiable) */}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Adresse e-mail</div>
               <div style={{ padding: 12, borderRadius: 6, border: '1px solid #DADDE1', background: '#F0F2F5', fontSize: 14, color: '#8A8D91' }}>
@@ -796,7 +806,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Pseudo */}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Pseudo</div>
               <div style={{ position: 'relative' }}>
@@ -815,12 +824,19 @@ export default function Home() {
               {settingsPseudoStatus === 'available' && <div style={{ fontSize: 11, color: '#42B72A', marginTop: 4 }}>Pseudo disponible !</div>}
             </div>
 
-            {/* Ville */}
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Ville</div>
               <input type="text" value={settingsCity}
                 onChange={e => setSettingsCity(e.target.value)}
                 placeholder="Votre ville"
+                style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#65676B', marginBottom: 6, textTransform: 'uppercase' }}>Pays</div>
+              <input type="text" value={settingsCountry}
+                onChange={e => setSettingsCountry(e.target.value)}
+                placeholder="Votre pays (ex: France)"
                 style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #DADDE1', boxSizing: 'border-box', fontSize: 14 }} />
             </div>
 
@@ -829,17 +845,18 @@ export default function Home() {
               style={{
                 width: '100%', padding: 12, borderRadius: 6, border: 'none',
                 background: settingsPseudoStatus === 'taken' || settingsPseudo.length < 3 ? '#DADDE1' : '#1877F2',
-                color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer'
+                color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', marginBottom: 16
               }}>
-              {settingsSaved ? 'Enregistré !' : 'Enregistrer'}
+              {settingsSaved ? '✓ Enregistré !' : 'Enregistrer'}
+            </button>
+
+            <button onClick={() => supabase.auth.signOut()}
+              style={{ width: '100%', padding: 12, borderRadius: 6, border: '1px solid #E41E1E', background: '#fff', color: '#E41E1E', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              Se déconnecter
             </button>
           </div>
         )}
 
-        <button onClick={() => supabase.auth.signOut()}
-          style={{ background: 'none', border: 'none', color: '#1877F2', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          Se déconnecter
-        </button>
       </div>
     </div>
   )
