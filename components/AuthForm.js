@@ -24,21 +24,6 @@ export default function AuthForm({ onLogin }) {
     }
   }, [])
 
-  // Après confirmation d'email, Supabase crée une session temporaire :
-  // on récupère l'email pour pré-remplir le champ, puis on déconnecte
-  // pour forcer la saisie du mot de passe.
-  useEffect(() => {
-    async function checkConfirmedEmail() {
-      const { data } = await supabase.auth.getSession()
-      if (data.session?.user?.email) {
-        setEmail(data.session.user.email)
-        setMode('login')
-        await supabase.auth.signOut()
-      }
-    }
-    checkConfirmedEmail()
-  }, [])
-
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
